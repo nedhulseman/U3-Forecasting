@@ -1,0 +1,78 @@
+/****************************/
+/* @Ned Hulseman	          */
+/* @10/02/2017		          */
+/* Forecasting Unemployment */
+/****************************/
+
+/*This script makes use of two data sets
+/* @u3
+/* @train
+/*
+
+/*Checks the types of variables imported*/
+proc contents data=train;
+run;
+
+/*plots the data so that we can get an idea what is going on*/
+proc sgplot data=train;
+	series x=date y=u3rate;
+run;
+
+/*There seems to be a seasonal structure so we should run an
+augmented dickey-fuller test for seasons*/
+proc arima data=train;
+	identify var=u3rate nlag=24 stationarity=(adf=2 dlag=12);
+run;
+quit;/*We reject the single mean test at all three lags and 
+		therefore conclude we have a deterministic process
+		so we should use dummy varibales*/
+
+/*We will model monthly dummy variables using May as a BY*/
+proc arima data=u3 plot=all;
+	identify var=u3rate nlag=24 stationarity=(adf=2) 
+			crosscorr=(January February March April June July August October November December);
+	estimate input=(January February March April June July August October November December);
+run;
+quit;
+
+/*Based on acf and pacf we use the following arima model and gain white noise*/
+proc arima data=train plot=all outfor=forecast_train;
+	identify var=u3rate nlag=24 esacf minic scan p=(0:15) q=(0:15) stationarity=(adf=2) 
+			crosscorr=(January February March April June July August October November December);
+	estimate p=11 q=(1 2 3 4 5 6 7 8 9 10 11 12 24) 
+			input=(January February March April June July August October November December) ;
+	forecast lead=24;
+run;
+quit;
+
+/*The next three steps merge the forecast and actual data to test on validation*/
+data forecast_train;
+	set forecast_train ;
+	time_id=_n_;
+run;
+data u3;
+	set u3;
+	time_id=_n_;
+run;
+
+data forecasted;
+	merge u3 forecast_train(keep=time_id forecast);
+		by time_id;
+	ape=abs((u3rate-forecast)/u3rate);
+run;
+proc means data=forecasted;/*mape calculation*/
+	where time_id>813;
+run;
+
+
+/*Visualize our model on the validation data*/
+proc sgplot data=forecasted;
+	series x=Date y=forecast;
+	series x=Date y=u3rate;
+run;
+
+proc sgplot data=forecasted;
+	series x=Date y=forecast;
+	series x=Date y=u3rate;
+	where time_id>685;
+run;
